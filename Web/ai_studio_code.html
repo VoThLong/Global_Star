@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Remote Serial Monitor</title>
+    <style>
+        /* CSS giữ nguyên, đang hoạt động tốt */
+        body { margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; flex-direction: column; height: 100vh; background-color: #2b2b2b; color: #ececec; }
+        #header { display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; background-color: #1e1e1e; border-bottom: 1px solid #3c3c3c; }
+        #header-title { font-size: 1.2rem; font-weight: bold; }
+        #header-controls { display: flex; align-items: center; gap: 15px; }
+        #status { display: flex; align-items: center; font-size: 0.9rem; color: #aaa; }
+        #status-dot { width: 10px; height: 10px; border-radius: 50%; background-color: #f44336; margin-right: 8px; transition: background-color 0.3s; }
+        #status-dot.connected { background-color: #4caf50; box-shadow: 0 0 5px #4caf50; }
+        #clearBtn { padding: 6px 12px; font-size: 0.9rem; background-color: #444; color: #fff; border: 1px solid #555; border-radius: 4px; cursor: pointer; transition: background 0.2s; }
+        #clearBtn:hover { background-color: #5a5a5a; }
+        #logArea { flex-grow: 1; padding: 15px; overflow-y: auto; font-family: 'Consolas', 'Courier New', monospace; font-size: 14px; background-color: #121212; word-wrap: break-word; }
+        .log-line { margin-bottom: 6px; line-height: 1.4; display: flex; }
+        .log-time { color: #888; margin-right: 12px; user-select: none; white-space: nowrap; }
+        .log-content { white-space: pre-wrap; }
+        .type-cmd .log-content { color: #4fc1ff; } 
+        .type-res .log-content { color: #4caf50; } 
+        .type-data .log-content { color: #ffeb3b; }
+        #bottom-bar { display: flex; padding: 15px; background-color: #1e1e1e; border-top: 1px solid #3c3c3c; gap: 10px; }
+        #cmdInput { flex-grow: 1; padding: 10px 15px; font-size: 16px; font-family: 'Consolas', 'Courier New', monospace; border: 1px solid #444; border-radius: 4px; background-color: #2b2b2b; color: #fff; outline: none; transition: border-color 0.2s; }
+        #cmdInput:focus { border-color: #4fc1ff; }
+        #sendBtn { padding: 0 25px; font-size: 16px; font-weight: bold; background-color: #4fc1ff; color: #121212; border: none; border-radius: 4px; cursor: pointer; transition: background 0.2s; }
+        #sendBtn:hover { background-color: #3baee0; }
+    </style>
+</head>
+<body>
+
+    <div id="header">
+        <div id="header-title">Remote Serial Monitor</div>
+        <div id="header-controls">
+            <div id="status">
+                <div id="status-dot"></div>
+                <span id="status-text">Disconnected</span>
+            </div>
+            <button id="clearBtn">Clear Log</button>
+        </div>
+    </div>
+
+    <div id="logArea"></div>
+
+    <div id="bottom-bar">
+        <input type="text" id="cmdInput" placeholder="Type AT command here..." autocomplete="off" autofocus>
+        <button id="sendBtn">Send</button>
+    </div>
+
+    <script>
+        // -------------------------------------------------------------------
+        // CẤU HÌNH QUAN TRỌNG: SỬA ĐỊA CHỈ NÀY THÀNH IP CỦA ESP32 / SERVER
+        // -------------------------------------------------------------------
+        const BASE_URL = `${window.location.protocol}//${window.location.hostname}:3000`;
+        
+        const POLL_INTERVAL_MS = 1500; 
+
+        // DOM Elements
+        const logArea = document.getElementById('logArea');
+        const cmdInput = document.getElementById('cmdInput');
+        const sendBtn = document.getElementById('sendBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const statusDot = document.getElementById('status-dot');
+        const statusText = document.getElementById('status-text');
+
+        // State
+        const seenLogs = new Set(); 
+
+        function updateStatus(isConnected) {
+            if (isConnected) {
+                statusDot.classList.add('connected');
+                statusText.textContent = 'Connected';
+            } else {
+                statusDot.classList.remove('connected');
+                statusText.textContent = 'Disconnected';
+            }
+        }
+
+        function getLocalTimestamp() {
+            const now = new Date();
+            return now.toISOString().replace('T', ' ').substring(0, 23);
+        }
+
+        function appendLog(type, content, timestamp) {
+            const logId = `${timestamp}-${type}-${content}`;
+            if (seenLogs.has(logId)) return;
+            seenLogs.add(logId);
+
+            const line = document.createElement('div');
+            line.className = `log-line type-${type}`;
+            
+            const timeSpan = document.createElement('span');
+            timeSpan.className = 'log-time';
+            timeSpan.textContent = `[${timestamp || getLocalTimestamp()}]`;
+            
+            const prefix = (type === 'cmd') ? '>> ' : '<< ';
+            const contentSpan = document.createElement('span');
+            contentSpan.className = 'log-content';
+            contentSpan.textContent = prefix + content;
+
+            line.appendChild(timeSpan);
+            line.appendChild(contentSpan);
+            logArea.appendChild(line);
+
+            logArea.scrollTop = logArea.scrollHeight;
+        }
+
+        async function sendCommand() {
+            const cmdText = cmdInput.value.trim();
+            if (!cmdText) return;
+
+            appendLog('cmd', cmdText, getLocalTimestamp());
+            cmdInput.value = '';
+
+            try {
+                // ĐÃ SỬA: Thêm BASE_URL
+                const response = await fetch(`${BASE_URL}/command`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ command: cmdText })
+                });
+
+                if (!response.ok) throw new Error('Command failed');
+                updateStatus(true);
+            } catch (error) {
+                console.error('Error sending command:', error);
+                updateStatus(false);
+            }
+        }
+
+        async function pollLogs() {
+            try {
+                // ĐÃ SỬA: Thêm BASE_URL
+                const response = await fetch(`${BASE_URL}/logs`);
+                if (!response.ok) throw new Error('Poll failed');
+                
+                const logs = await response.json();
+                updateStatus(true);
+                
+                if (Array.isArray(logs)) {
+                    logs.forEach(log => {
+                        appendLog(log.type, log.content, log.timestamp);
+                    });
+                }
+            } catch (error) {
+                console.error('Error polling logs:', error);
+                updateStatus(false);
+            }
+        }
+
+        sendBtn.addEventListener('click', sendCommand);
+        
+        // ĐÃ SỬA: keypress -> keydown
+        cmdInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                sendCommand();
+            }
+        });
+
+        clearBtn.addEventListener('click', () => {
+            logArea.innerHTML = '';
+            // ĐÃ SỬA: Clear luôn set để reset dedup
+            seenLogs.clear();
+        });
+
+        setInterval(pollLogs, POLL_INTERVAL_MS);
+        pollLogs();
+    </script>
+</body>
+</html>
