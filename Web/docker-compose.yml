@@ -1,0 +1,6 @@
+services:
+  ttlab-global-star-web:
+    build: .
+    container_name: ttlab-global-star-web
+    ports:
+      - "${PORT:-3000}:${PORT:-3000}"
