@@ -55,7 +55,7 @@
         // -------------------------------------------------------------------
         const BASE_URL = `${window.location.protocol}//${window.location.hostname}:3000`;
         
-        const POLL_INTERVAL_MS = 1500; 
+        const POLL_INTERVAL_MS = 500; 
 
         // DOM Elements
         const logArea = document.getElementById('logArea');
@@ -80,19 +80,19 @@
 
         function getLocalTimestamp() {
             const now = new Date();
-            return now.toISOString().replace('T', ' ').substring(0, 23);
+            return now.toISOString().replace('T', ' ').substring(0, 19);
         }
 
-        function appendLog(type, content, timestamp) {
-            const logId = `${timestamp}-${type}-${content}`;
-            if (seenLogs.has(logId)) return;
-            seenLogs.add(logId);
+        function appendLog(id, type, content, timestamp) {
+            if (id && seenLogs.has(id)) return;
+            if (id) seenLogs.add(id);
 
             const line = document.createElement('div');
             line.className = `log-line type-${type}`;
             
             const timeSpan = document.createElement('span');
             timeSpan.className = 'log-time';
+            // Hiển thị timestamp từ server hoặc máy local nếu server chưa có
             timeSpan.textContent = `[${timestamp || getLocalTimestamp()}]`;
             
             const prefix = (type === 'cmd') ? '>> ' : '<< ';
@@ -111,11 +111,9 @@
             const cmdText = cmdInput.value.trim();
             if (!cmdText) return;
 
-            appendLog('cmd', cmdText, getLocalTimestamp());
             cmdInput.value = '';
 
             try {
-                // ĐÃ SỬA: Thêm BASE_URL
                 const response = await fetch(`${BASE_URL}/command`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -124,6 +122,8 @@
 
                 if (!response.ok) throw new Error('Command failed');
                 updateStatus(true);
+                // Sau khi gửi xong, gọi poll ngay lập tức để hiện lệnh lên màn hình
+                pollLogs();
             } catch (error) {
                 console.error('Error sending command:', error);
                 updateStatus(false);
@@ -132,7 +132,6 @@
 
         async function pollLogs() {
             try {
-                // ĐÃ SỬA: Thêm BASE_URL
                 const response = await fetch(`${BASE_URL}/logs`);
                 if (!response.ok) throw new Error('Poll failed');
                 
@@ -141,7 +140,7 @@
                 
                 if (Array.isArray(logs)) {
                     logs.forEach(log => {
-                        appendLog(log.type, log.content, log.timestamp);
+                        appendLog(log.id, log.type, log.content, log.timestamp);
                     });
                 }
             } catch (error) {

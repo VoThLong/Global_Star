@@ -1,0 +1,15 @@
+services:
+  serial-monitor:
+    build: .
+    container_name: serial-monitor
+    ports:
+      - "3000:3000"
+    volumes:
+      - serial_db_data:/app/data
+    restart: unless-stopped
+    environment:
+      - TZ=Asia/Ho_Chi_Minh
+      - PORT=3000
+
+volumes:
+  serial_db_data:
