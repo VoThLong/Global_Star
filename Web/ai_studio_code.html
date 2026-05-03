@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Remote Serial Monitor</title>
     <style>
-        /* CSS giữ nguyên, đang hoạt động tốt */
         body { margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; flex-direction: column; height: 100vh; background-color: #2b2b2b; color: #ececec; }
         #header { display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; background-color: #1e1e1e; border-bottom: 1px solid #3c3c3c; }
         #header-title { font-size: 1.2rem; font-weight: bold; }
@@ -38,6 +37,7 @@
                 <div id="status-dot"></div>
                 <span id="status-text">Disconnected</span>
             </div>
+            <a href="/history-view" id="historyBtn" style="padding: 6px 12px; font-size: 0.9rem; background-color: #444; color: #fff; border: 1px solid #555; border-radius: 4px; cursor: pointer; text-decoration: none; transition: background 0.2s;">View History</a>
             <button id="clearBtn">Clear Log</button>
         </div>
     </div>
@@ -50,14 +50,9 @@
     </div>
 
     <script>
-        // -------------------------------------------------------------------
-        // CẤU HÌNH QUAN TRỌNG: SỬA ĐỊA CHỈ NÀY THÀNH IP CỦA ESP32 / SERVER
-        // -------------------------------------------------------------------
         const BASE_URL = `${window.location.protocol}//${window.location.hostname}:3000`;
-        
-        const POLL_INTERVAL_MS = 1500; 
+        const POLL_INTERVAL_MS = 500; 
 
-        // DOM Elements
         const logArea = document.getElementById('logArea');
         const cmdInput = document.getElementById('cmdInput');
         const sendBtn = document.getElementById('sendBtn');
@@ -65,28 +60,39 @@
         const statusDot = document.getElementById('status-dot');
         const statusText = document.getElementById('status-text');
 
-        // State
         const seenLogs = new Set(); 
+        let lastClearId = 0; 
+        let isFirstPoll = true; // Cờ đánh dấu lần tải đầu tiên
 
-        function updateStatus(isConnected) {
-            if (isConnected) {
-                statusDot.classList.add('connected');
-                statusText.textContent = 'Connected';
+        function updateStatus(serverOnline, esp32Online, lastSeen) {
+            statusDot.classList.remove('connected');
+            statusDot.style.backgroundColor = '#f44336'; 
+            statusDot.style.boxShadow = 'none';
+
+            if (serverOnline) {
+                if (esp32Online) {
+                    statusDot.classList.add('connected');
+                    statusDot.style.backgroundColor = '#4caf50'; 
+                    statusText.textContent = `ESP32 Online`;
+                } else {
+                    statusDot.style.backgroundColor = '#ffeb3b'; 
+                    statusDot.style.boxShadow = '0 0 5px #ffeb3b';
+                    statusText.textContent = `ESP32 Offline (${lastSeen || '?'}s ago)`;
+                }
             } else {
-                statusDot.classList.remove('connected');
-                statusText.textContent = 'Disconnected';
+                statusText.textContent = 'Server Offline';
             }
         }
 
         function getLocalTimestamp() {
             const now = new Date();
-            return now.toISOString().replace('T', ' ').substring(0, 23);
+            return now.toISOString().replace('T', ' ').substring(0, 19);
         }
 
-        function appendLog(type, content, timestamp) {
-            const logId = `${timestamp}-${type}-${content}`;
-            if (seenLogs.has(logId)) return;
-            seenLogs.add(logId);
+        function appendLog(id, type, content, timestamp) {
+            if (id && seenLogs.has(id)) return;
+            if (id && id <= lastClearId) return;
+            if (id) seenLogs.add(id);
 
             const line = document.createElement('div');
             line.className = `log-line type-${type}`;
@@ -110,12 +116,9 @@
         async function sendCommand() {
             const cmdText = cmdInput.value.trim();
             if (!cmdText) return;
-
-            appendLog('cmd', cmdText, getLocalTimestamp());
             cmdInput.value = '';
 
             try {
-                // ĐÃ SỬA: Thêm BASE_URL
                 const response = await fetch(`${BASE_URL}/command`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -124,6 +127,7 @@
 
                 if (!response.ok) throw new Error('Command failed');
                 updateStatus(true);
+                pollLogs(); 
             } catch (error) {
                 console.error('Error sending command:', error);
                 updateStatus(false);
@@ -132,36 +136,45 @@
 
         async function pollLogs() {
             try {
-                // ĐÃ SỬA: Thêm BASE_URL
-                const response = await fetch(`${BASE_URL}/logs`);
-                if (!response.ok) throw new Error('Poll failed');
+                const [logRes, statusRes] = await Promise.all([
+                    fetch(`${BASE_URL}/logs`),
+                    fetch(`${BASE_URL}/status`)
+                ]);
+
+                if (!logRes.ok || !statusRes.ok) throw new Error('Poll failed');
                 
-                const logs = await response.json();
-                updateStatus(true);
+                const logs = await logRes.json();
+                const status = await statusRes.json();
                 
-                if (Array.isArray(logs)) {
+                updateStatus(true, status.esp32 === 'online', status.lastSeenSecondsAgo);
+                
+                if (Array.isArray(logs) && logs.length > 0) {
+                    if (isFirstPoll) {
+                        lastClearId = Math.max(...logs.map(l => l.id));
+                        isFirstPoll = false;
+                        return; 
+                    }
+                    
                     logs.forEach(log => {
-                        appendLog(log.type, log.content, log.timestamp);
+                        appendLog(log.id, log.type, log.content, log.timestamp);
                     });
                 }
             } catch (error) {
                 console.error('Error polling logs:', error);
-                updateStatus(false);
+                updateStatus(false, false, 0);
             }
         }
 
         sendBtn.addEventListener('click', sendCommand);
-        
-        // ĐÃ SỬA: keypress -> keydown
         cmdInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
-                sendCommand();
-            }
+            if (e.key === 'Enter') sendCommand();
         });
 
         clearBtn.addEventListener('click', () => {
+            if (seenLogs.size > 0) {
+                lastClearId = Math.max(...seenLogs);
+            }
             logArea.innerHTML = '';
-            // ĐÃ SỬA: Clear luôn set để reset dedup
             seenLogs.clear();
         });
 

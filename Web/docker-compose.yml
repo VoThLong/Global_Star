@@ -10,7 +10,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - ./pgdata:/var/lib/postgresql/data
+      - ttlab_pg_data:/var/lib/postgresql/data
     networks:
       - internal
 
@@ -32,3 +32,6 @@ services:
 
 networks:
   internal:
+
+volumes:
+  ttlab_pg_data:

@@ -1,117 +1,82 @@
 #include "UartBridge.h"
-#include <Arduino.h>
 
-void UartBridge::ensureUartReady() {
-    if (_uartReady) return;
-    Serial1.begin(RM200_BAUD, SERIAL_8N1, RM200_RX_PIN, RM200_TX_PIN);
-    _uartReady = true;
-    Serial.printf("Bridge: UART initialized at %d baud (RX=%d, TX=%d)\n",
-                  RM200_BAUD, RM200_RX_PIN, RM200_TX_PIN);
+UartBridge::UartBridge() : bufferIdx(0), lastByteTime(0), serverAvailable(false) {
+    memset(buffer, 0, BUFFER_SIZE);
 }
 
-void UartBridge::begin(uint16_t port) {
-    _isActiveClientMode = false;
-    ensureUartReady();
-    
-    _server = new WiFiServer(port);
-    _server->begin();
-    Serial.printf("Bridge: Server mode started on port %d\n", port);
+void UartBridge::connect(IPAddress ip, uint16_t port) {
+    // Với HTTP, ta không giữ kết nối liên tục như TCP
+    serverAvailable = true;
+    Serial.println("[HTTP] UartBridge ready in HTTP mode");
 }
 
-void UartBridge::connect(IPAddress remoteIP, uint16_t remotePort) {
-    _isActiveClientMode = true;
-    _remoteIP = remoteIP;
-    _remotePort = remotePort;
-    
-    ensureUartReady();
-    Serial.printf("Bridge: Client mode configured to connect to Portal at %s:%d\n", 
-                  _remoteIP.toString().c_str(), _remotePort);
+void UartBridge::injectToServer(char c) {
+    if (bufferIdx < BUFFER_SIZE - 1) {
+        buffer[bufferIdx++] = c;
+        lastByteTime = millis();
+    }
 }
 
 void UartBridge::update() {
-    ensureUartReady();
-    unsigned long now = millis();
-
-    // 1. Quản lý kết nối
-    if (_isActiveClientMode) {
-        // CHẾ ĐỘ CLIENT: Chủ động kết nối/kết nối lại
-        if (!_client.connected()) {
-            unsigned long now = millis();
-            if (now - _lastReconnectAttempt > 5000) { // Thử lại mỗi 5s
-                _lastReconnectAttempt = now;
-                Serial.printf("Connecting to Portal %s:%d...\n", _remoteIP.toString().c_str(), _remotePort);
-                if (_client.connect(_remoteIP, _remotePort)) {
-                    _client.setNoDelay(true);
-                    Serial.println("Connected to Portal!");
-                }
-            }
-        }
-    } else if (_server != nullptr) {
-        // CHẾ ĐỘ SERVER: Chờ Client mới
-        if (_server->hasClient()) {
-            WiFiClient newClient = _server->available();
-            if (newClient) {
-                if (_client && _client.connected()) {
-                    _client.stop();
-                    Serial.println("Closed old client for new connection.");
-                }
-                _client = newClient;
-                _client.setNoDelay(true);
-                Serial.printf("\n--- New client connected from %s ---\n", _client.remoteIP().toString().c_str());
-                _bufferCount = 0;
-            }
-        }
+    // 1. Gửi dữ liệu UART lên Web (Gom gói)
+    if (bufferIdx > 0 && (millis() - lastByteTime > UART_AGGREGATION_MS)) {
+        buffer[bufferIdx] = '\0';
+        sendDataToWeb(String(buffer));
+        bufferIdx = 0;
+        memset(buffer, 0, BUFFER_SIZE);
     }
 
-    // 2. Xử lý dữ liệu (Chỉ khi đã có kết nối)
-    if (_client && _client.connected()) {
-        // WiFi -> UART
-        while (_client.available()) {
-            uint8_t webByte = static_cast<uint8_t>(_client.read());
-            Serial1.write(webByte);
-            Serial.write(webByte); // In lệnh từ Server web ra màn hình Serial
-        }
+    // 2. Định kỳ lấy lệnh từ Web về (Poll)
+    static unsigned long lastPoll = 0;
+    if (millis() - lastPoll > 1000) { // Poll mỗi 1 giây
+        pollCommandFromWeb();
+        lastPoll = millis();
+    }
+}
 
-        // UART -> WiFi (Gom gói 5ms)
-        while (Serial1.available() && _bufferCount < BUFFER_SIZE) {
-            uint8_t byteRead = static_cast<uint8_t>(Serial1.read());
-            _uartBuffer[_bufferCount++] = byteRead;
-            Serial.write(byteRead); // In phản hồi từ Vệ tinh ra màn hình Serial
-            _uartRxSinceReport++;
-            _lastByteTime = millis();
-        }
+void UartBridge::sendDataToWeb(String data) {
+    if (WiFi.status() != WL_CONNECTED) return;
 
-        if (_bufferCount > 0 && (millis() - _lastByteTime >= UART_AGGREGATION_MS)) {
-            _client.write(_uartBuffer, _bufferCount);
-            _bufferCount = 0;
-        }
+    HTTPClient http;
+    http.begin(API_UPLOAD);
+    http.addHeader("Content-Type", "text/plain"); // Gửi dạng văn bản thuần túy
+
+    int httpResponseCode = http.POST(data); // Gửi trực tiếp chuỗi data thô
+    
+    if (httpResponseCode > 0) {
+        // Thành công
     } else {
-        // Mirror dữ liệu UART lên Serial Monitor ngay cả khi chưa có client TCP.
-        while (Serial1.available()) {
-            uint8_t byteRead = static_cast<uint8_t>(Serial1.read());
-            Serial.write(byteRead);
-            _uartRxSinceReport++;
-        }
-        _bufferCount = 0;
+        Serial.printf("[HTTP] Send failed, error: %s\n", http.errorToString(httpResponseCode).c_str());
     }
+    http.end();
+}
 
-    if (now - _lastUartReport >= 1000) {
-        if (_uartRxSinceReport > 0) {
-            Serial.printf("\n[UART] RX %u bytes/s\n", static_cast<unsigned>(_uartRxSinceReport));
-            _uartRxSinceReport = 0;
+void UartBridge::pollCommandFromWeb() {
+    if (WiFi.status() != WL_CONNECTED) return;
+
+    HTTPClient http;
+    http.begin(API_COMMAND);
+    
+    int httpResponseCode = http.GET();
+    
+    if (httpResponseCode == 200) {
+        String payload = http.getString();
+        if (payload.length() > 0) {
+            Serial.print("\n[WEB CMD] Received: ");
+            Serial.println(payload);
+            
+            // Gửi lệnh xuống Module RM200M qua Serial1 kèm theo ký tự xuống dòng
+            Serial1.println(payload); 
+            
+            // Phản hồi ngược lại Web Server để xác nhận đã nhận lệnh (nếu cần)
+            // Ở đây ta có thể in ra Serial để người dùng thấy trên CuteCom
+            Serial.print(">> Sent to RM200M: ");
+            Serial.println(payload);
         }
-        _lastUartReport = now;
     }
+    http.end();
 }
 
 bool UartBridge::isClientConnected() {
-    return (_client && _client.connected());
-}
-
-void UartBridge::injectToServer(uint8_t data) {
-    // Nhét trực tiếp ký tự từ USB vào bộ đệm TCP (Gom gói 5ms)
-    if (_bufferCount < BUFFER_SIZE) {
-        _uartBuffer[_bufferCount++] = data;
-        _lastByteTime = millis();
-    }
+    return WiFi.status() == WL_CONNECTED;
 }

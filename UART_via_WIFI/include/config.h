@@ -3,11 +3,15 @@
 
 // --- Cấu hình Wi-Fi ---
 #define WIFI_SSID "UIT PubliC"
-#define WIFI_PASS "mehehehe" // Mật khẩu được bảo mật (hãy điền pass thật khi test)
+#define WIFI_PASS "mehehehe" 
 
-// --- Cấu hình TCP Server (Web của giảng viên) ---
-#define SERVER_IP "172.16.214.213" // IP của Server (Thay đổi theo IP thực tế của thầy)
-#define SERVER_PORT 8080          // Port lắng nghe của Server
+// --- Cấu hình Web Server ---
+#define SERVER_IP "192.168.1.17"
+#define SERVER_PORT 3000
+
+// Các Endpoint HTTP
+#define API_UPLOAD "http://192.168.1.17:3000/upload"
+#define API_COMMAND "http://192.168.1.17:3000/command"
 
 // --- Cấu hình hệ thống ---
 #define DEBUG_BAUD 115200
@@ -17,7 +21,7 @@
 #define STATUS_LED_PIN 8
 
 // --- Tham số Gom gói (Aggregation) ---
-#define UART_AGGREGATION_MS 5
-#define BUFFER_SIZE 1024
+#define UART_AGGREGATION_MS 50 // Tăng lên một chút để gom gói HTTP hiệu quả hơn
+#define BUFFER_SIZE 2048
 
 #endif
