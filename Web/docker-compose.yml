@@ -1,15 +1,38 @@
 services:
-  serial-monitor:
-    build: .
-    container_name: serial-monitor
-    ports:
-      - "3000:3000"
-    volumes:
-      - serial_db_data:/app/data
-    restart: unless-stopped
+  ttlab-db:
+    image: postgres:15-alpine
+    container_name: ttlab-db
+    restart: always
     environment:
-      - TZ=Asia/Ho_Chi_Minh
-      - PORT=3000
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-password}
+      POSTGRES_DB: ${DB_NAME:-serial_monitor}
+    ports:
+      - "5432:5432"
+    volumes:
+      - ttlab_pg_data:/var/lib/postgresql/data
+    networks:
+      - internal
+
+  ttlab-global-star-web:
+    build: .
+    container_name: ttlab-global-star-web
+    restart: always
+    ports:
+      - "${PORT:-3000}:${PORT:-3000}"
+    environment:
+      DB_HOST: ttlab-db
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-password}
+      DB_NAME: ${DB_NAME:-serial_monitor}
+      TZ: Asia/Ho_Chi_Minh
+    depends_on:
+      - ttlab-db
+    networks:
+      - internal
+
+networks:
+  internal:
 
 volumes:
-  serial_db_data:
+  ttlab_pg_data:

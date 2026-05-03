@@ -55,3 +55,4 @@ bool NetworkManager::isConnected() {
 IPAddress NetworkManager::getIP() {
     return WiFi.localIP();
 }
+

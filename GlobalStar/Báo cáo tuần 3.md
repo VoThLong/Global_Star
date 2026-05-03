@@ -67,6 +67,27 @@ Hệ thống được thiết kế theo hướng đối tượng (OOP) với cá
     - **Nháy nhanh (5Hz):** Đã có WiFi, đang chờ kết nối Bridge tới TCP Server.
         
     - **Sáng tĩnh:** Hệ thống thông suốt, đã kết nối thành công tới Server.
+
+```mermaid
+flowchart TD
+    Start([Bắt đầu]) --> InitWiFi[Khởi tạo WiFi & LED]
+    InitWiFi --> CheckWiFi{WiFi đã kết nối?}
+    
+    CheckWiFi -- No --> SlowBlink[Nháy chậm 1Hz]
+    SlowBlink --> Reconnect[Tự động kết nối lại]
+    Reconnect --> CheckWiFi
+    
+    CheckWiFi -- Yes --> CheckBridge{TCP Bridge connected?}
+    
+    CheckBridge -- No --> FastBlink[Nháy nhanh 5Hz]
+    FastBlink --> WaitBridge[Chờ Server/Client kết nối]
+    WaitBridge --> CheckWiFi
+    
+    CheckBridge -- Yes --> SolidOn[LED sáng tĩnh]
+    SolidOn --> Working[Truyền nhận dữ liệu UART-TCP]
+    Working --> CheckWiFi
+```
+
 4. Cơ chế Debug Bypass & Local Echo (Hỗ trợ phát triển): 
 	- Hệ thống cho phép sử dụng cổng USB CDC (kết nối với phần mềm CuteCom/Serial Monitor trên máy tính) để can thiệp trực tiếp vào luồng dữ liệu. Lệnh AT gõ từ máy tính sẽ được xử lý song song: vừa truyền xuống module RM200M (để cấu hình vệ tinh), vừa hiển thị lại trên màn hình (Local Echo), đồng thời đẩy thẳng lên TCP Server (Bypass) để kiểm thử Backend mà không cần đợi module phần cứng phản hồi.
 
@@ -221,18 +242,22 @@ Biểu đồ tuần tự dưới đây mô tả cách `UartBridge` ngăn chặn 
 
 ```mermaid
 sequenceDiagram
-    participant RM as Module RM200M
-    participant ESP as UartBridge (ESP32)
     participant SRV as TCP Server
+    participant ESP as UartBridge (ESP32)
+    participant RM as Module RM200M
 
-    Note over ESP: Chờ dữ liệu từ UART (Hardware Serial)
-    RM->>ESP: Ký tự 'A'
+    Note over SRV, RM: Quy trình gửi lệnh và gom gói phản hồi
+    SRV->>ESP: Gửi lệnh AT
+    ESP->>RM: Chuyển tiếp xuống UART
+    
+    Note over ESP: ESP chờ phản hồi từ UART (Gom gói)
+    RM->>ESP: Ký tự 'O'
     ESP->>ESP: Lưu vào Buffer & Đặt lại Timer
-    RM->>ESP: Ký tự 'T'
+    RM->>ESP: Ký tự 'K'
     ESP->>ESP: Lưu vào Buffer & Đặt lại Timer
     Note over ESP: Trôi qua > 5ms (Không có byte mới)
-    ESP->>SRV: Đóng gói TCP gửi mảng "AT"
-    SRV-->>ESP: Server nhận được tập lệnh trọn vẹn
+    ESP->>SRV: Đóng gói TCP gửi mảng "OK"
+    SRV-->>ESP: Server nhận được phản hồi trọn vẹn
 ```
 
 # 6. Quy trình kiểm thử (Testing) & Kết quả

@@ -16,16 +16,24 @@ void setup() {
     Serial.println("\n--- UART to TCP Server Bridge ---");
     Serial.printf("Debug baud: %d\n", DEBUG_BAUD);
     Serial.printf("UART1 config: baud=%d RX=%d TX=%d\n", RM200_BAUD, RM200_RX_PIN, RM200_TX_PIN);
+    Serial1.begin(RM200_BAUD, SERIAL_8N1, RM200_RX_PIN, RM200_TX_PIN);
     net.begin(WIFI_SSID, WIFI_PASS);
 }
 
 void loop() {
-    // --- ĐỌC LỆNH TỪ CUTECOM (USB) ---
+    // --- 1. ĐỌC LỆNH TỪ CUTECOM (USB) -> GỬI XUỐNG MODULE & WEB ---
     while (Serial.available()) {
         char c = Serial.read();
-        Serial1.write(c);            // Đẩy lệnh xuống module RM200M
-        Serial.write(c);             // Local Echo: In ngược lại lên CuteCom để ông thấy chữ vừa gõ
-        bridge.injectToServer(c);    // Bypass: Nhét thẳng chữ vừa gõ vào bộ đệm để đẩy lên Web Server
+        Serial1.write(c);            
+        Serial.write(c);             
+        bridge.injectToServer(c);    
+    }
+
+    // --- 2. ĐỌC PHẢN HỒI TỪ MODULE (SERIAL1) -> GỬI LÊN WEB & USB ---
+    while (Serial1.available()) {
+        char c = Serial1.read();
+        Serial.write(c);             // Hiển thị lên màn hình Debug (USB)
+        bridge.injectToServer(c);    // Gửi lên Web Server
     }
     // ---------------------------------
 

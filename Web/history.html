@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Serial Monitor - Full History</title>
+    <style>
+        body { margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #2b2b2b; color: #ececec; display: flex; flex-direction: column; height: 100vh; }
+        #header { display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; background-color: #1e1e1e; border-bottom: 1px solid #3c3c3c; }
+        #header-title { font-size: 1.2rem; font-weight: bold; }
+        .btn { padding: 8px 16px; font-size: 0.9rem; background-color: #444; color: #fff; border: 1px solid #555; border-radius: 4px; cursor: pointer; text-decoration: none; transition: background 0.2s; }
+        .btn:hover { background-color: #5a5a5a; }
+        .btn-primary { background-color: #4fc1ff; color: #121212; border: none; }
+        .btn-primary:hover { background-color: #3baee0; }
+        #filter-bar { padding: 10px 20px; background-color: #252525; border-bottom: 1px solid #3c3c3c; display: flex; gap: 15px; align-items: center; }
+        input, select { background-color: #333; color: #fff; border: 1px solid #444; padding: 5px 10px; border-radius: 4px; }
+        #historyArea { flex-grow: 1; padding: 15px; overflow-y: auto; font-family: 'Consolas', 'Courier New', monospace; font-size: 14px; background-color: #121212; }
+        .log-line { margin-bottom: 6px; line-height: 1.4; border-bottom: 1px solid #1e1e1e; padding-bottom: 4px; }
+        .log-time { color: #888; margin-right: 12px; }
+        .log-type { display: inline-block; width: 40px; font-weight: bold; margin-right: 10px; }
+        .type-cmd { color: #4fc1ff; }
+        .type-res { color: #4caf50; }
+        .type-data { color: #ffeb3b; }
+    </style>
+</head>
+<body>
+    <div id="header">
+        <div id="header-title">Full Log History</div>
+        <div>
+            <a href="/" class="btn">Back to Monitor</a>
+            <button id="refreshBtn" class="btn btn-primary" style="margin-left: 10px;">Refresh</button>
+        </div>
+    </div>
+    <div id="filter-bar">
+        <span>Filter by Type:</span>
+        <select id="typeFilter">
+            <option value="all">All</option>
+            <option value="cmd">Command (>>)</option>
+            <option value="res">Response (<<)</option>
+            <option value="data">Data (<<)</option>
+        </select>
+        <input type="text" id="searchFilter" placeholder="Search content...">
+    </div>
+    <div id="historyArea"></div>
+
+    <script>
+        const BASE_URL = `${window.location.protocol}//${window.location.hostname}:3000`;
+        const historyArea = document.getElementById('historyArea');
+        const typeFilter = document.getElementById('typeFilter');
+        const searchFilter = document.getElementById('searchFilter');
+        const refreshBtn = document.getElementById('refreshBtn');
+
+        let allLogs = [];
+
+        async function fetchHistory() {
+            try {
+                historyArea.innerHTML = 'Loading history...';
+                const response = await fetch(`${BASE_URL}/history`);
+                allLogs = await response.json();
+                renderLogs();
+            } catch (error) {
+                historyArea.innerHTML = 'Error loading history: ' + error.message;
+            }
+        }
+
+        function renderLogs() {
+            const type = typeFilter.value;
+            const search = searchFilter.value.toLowerCase();
+            
+            historyArea.innerHTML = '';
+            const filtered = allLogs.filter(log => {
+                const matchType = type === 'all' || log.type === type;
+                const matchSearch = log.content.toLowerCase().includes(search);
+                return matchType && matchSearch;
+            });
+
+            filtered.forEach(log => {
+                const line = document.createElement('div');
+                line.className = 'log-line';
+                
+                const time = new Date(log.timestamp).toLocaleString();
+                const prefix = (log.type === 'cmd') ? '>> ' : '<< ';
+                
+                line.innerHTML = `
+                    <span class="log-time">[${time}]</span>
+                    <span class="log-type type-${log.type}">${log.type.toUpperCase()}</span>
+                    <span class="log-content">${prefix}${escapeHtml(log.content)}</span>
+                `;
+                historyArea.appendChild(line);
+            });
+
+            if (filtered.length === 0) {
+                historyArea.innerHTML = 'No logs found matching filters.';
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        typeFilter.addEventListener('change', renderLogs);
+        searchFilter.addEventListener('input', renderLogs);
+        refreshBtn.addEventListener('click', fetchHistory);
+
+        fetchHistory();
+    </script>
+</body>
+</html>
