@@ -3,50 +3,44 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Remote Serial Monitor</title>
+    <title>ESP32 AI Studio Monitor</title>
     <style>
-        body { margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; flex-direction: column; height: 100vh; background-color: #2b2b2b; color: #ececec; }
-        #header { display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; background-color: #1e1e1e; border-bottom: 1px solid #3c3c3c; }
-        #header-title { font-size: 1.2rem; font-weight: bold; }
-        #header-controls { display: flex; align-items: center; gap: 15px; }
-        #status { display: flex; align-items: center; font-size: 0.9rem; color: #aaa; }
-        #status-dot { width: 10px; height: 10px; border-radius: 50%; background-color: #f44336; margin-right: 8px; transition: background-color 0.3s; }
-        #status-dot.connected { background-color: #4caf50; box-shadow: 0 0 5px #4caf50; }
-        #clearBtn { padding: 6px 12px; font-size: 0.9rem; background-color: #444; color: #fff; border: 1px solid #555; border-radius: 4px; cursor: pointer; transition: background 0.2s; }
-        #clearBtn:hover { background-color: #5a5a5a; }
-        #logArea { flex-grow: 1; padding: 15px; overflow-y: auto; font-family: 'Consolas', 'Courier New', monospace; font-size: 14px; background-color: #121212; word-wrap: break-word; }
-        .log-line { margin-bottom: 6px; line-height: 1.4; display: flex; }
-        .log-time { color: #888; margin-right: 12px; user-select: none; white-space: nowrap; }
-        .log-content { white-space: pre-wrap; }
-        .type-cmd .log-content { color: #4fc1ff; } 
-        .type-res .log-content { color: #4caf50; } 
-        .type-data .log-content { color: #ffeb3b; }
-        #bottom-bar { display: flex; padding: 15px; background-color: #1e1e1e; border-top: 1px solid #3c3c3c; gap: 10px; }
-        #cmdInput { flex-grow: 1; padding: 10px 15px; font-size: 16px; font-family: 'Consolas', 'Courier New', monospace; border: 1px solid #444; border-radius: 4px; background-color: #2b2b2b; color: #fff; outline: none; transition: border-color 0.2s; }
-        #cmdInput:focus { border-color: #4fc1ff; }
-        #sendBtn { padding: 0 25px; font-size: 16px; font-weight: bold; background-color: #4fc1ff; color: #121212; border: none; border-radius: 4px; cursor: pointer; transition: background 0.2s; }
-        #sendBtn:hover { background-color: #3baee0; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #1e1e1e; color: #d4d4d4; margin: 0; display: flex; flex-direction: column; height: 100vh; }
+        .header { background-color: #333; padding: 10px 20px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #444; }
+        .status-container { display: flex; align-items: center; gap: 10px; }
+        .status-dot { width: 12px; height: 12px; border-radius: 50%; background-color: #f44336; transition: background-color 0.3s; }
+        .status-dot.connected { background-color: #4caf50; box-shadow: 0 0 10px #4caf50; }
+        .log-container { flex: 1; padding: 10px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; font-family: 'Consolas', 'Courier New', monospace; font-size: 14px; background-color: #111; }
+        .log-line { display: flex; gap: 10px; border-bottom: 1px solid #222; padding: 2px 0; }
+        .log-time { color: #888; min-width: 160px; }
+        .log-content { white-space: pre-wrap; word-break: break-all; }
+        .type-cmd { color: #569cd6; font-weight: bold; }
+        .type-log { color: #ce9178; }
+        .input-container { background-color: #252526; padding: 10px 20px; display: flex; gap: 10px; border-top: 1px solid #444; }
+        input { flex: 1; background-color: #3c3c3c; border: 1px solid #555; color: #fff; padding: 8px 12px; border-radius: 4px; outline: none; }
+        input:focus { border-color: #007acc; }
+        button { background-color: #007acc; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: bold; transition: background 0.2s; }
+        button:hover { background-color: #0062a3; }
+        .clear-btn { background-color: #d83b01; }
+        .clear-btn:hover { background-color: #a32d01; }
     </style>
 </head>
 <body>
-
-    <div id="header">
-        <div id="header-title">Remote Serial Monitor</div>
-        <div id="header-controls">
-            <div id="status">
-                <div id="status-dot"></div>
-                <span id="status-text">Disconnected</span>
-            </div>
-            <a href="/history-view" id="historyBtn" style="padding: 6px 12px; font-size: 0.9rem; background-color: #444; color: #fff; border: 1px solid #555; border-radius: 4px; cursor: pointer; text-decoration: none; transition: background 0.2s;">View History</a>
-            <button id="clearBtn">Clear Log</button>
+    <div class="header">
+        <div style="font-size: 18px; font-weight: bold;">ESP32 Serial Monitor</div>
+        <div class="status-container">
+            <div id="status-dot" class="status-dot"></div>
+            <span id="status-text">Connecting...</span>
+            <a href="/history-view" target="_blank" style="color: #007acc; text-decoration: none; font-size: 14px; margin-left: 15px;">View Full History</a>
         </div>
     </div>
 
-    <div id="logArea"></div>
+    <div class="log-container" id="logArea"></div>
 
-    <div id="bottom-bar">
-        <input type="text" id="cmdInput" placeholder="Type AT command here..." autocomplete="off" autofocus>
+    <div class="input-container">
+        <input type="text" id="cmdInput" placeholder="Type command here (e.g. AT+CSQ)..." autocomplete="off">
         <button id="sendBtn">Send</button>
+        <button id="clearBtn" class="clear-btn">Clear View</button>
     </div>
 
     <script>
@@ -62,7 +56,8 @@
 
         const seenLogs = new Set(); 
         let lastClearId = 0; 
-        let isFirstPoll = true; // Cờ đánh dấu lần tải đầu tiên
+        let isFirstPoll = true; 
+        let commandMap = {}; 
 
         function updateStatus(serverOnline, esp32Online, lastSeen) {
             statusDot.classList.remove('connected');
@@ -94,18 +89,51 @@
             if (id && id <= lastClearId) return;
             if (id) seenLogs.add(id);
 
+            if (content.startsWith('__ACK__:')) {
+                const cmdId = content.split(':')[1];
+                if (commandMap[cmdId]) {
+                    commandMap[cmdId].style.color = '#4caf50'; 
+                }
+                return;
+            }
+
+            let responseId = null;
+            let displayContent = content;
+            if (type === 'log') {
+                const resMatch = content.match(/^\[(\d+)\] (.*)/);
+                if (resMatch) {
+                    responseId = resMatch[1];
+                    displayContent = resMatch[2];
+                }
+            }
+
             const line = document.createElement('div');
             line.className = `log-line type-${type}`;
             
             const timeSpan = document.createElement('span');
             timeSpan.className = 'log-time';
-            // Hiển thị timestamp từ server hoặc máy local nếu server chưa có
             timeSpan.textContent = `[${timestamp || getLocalTimestamp()}]`;
             
             const prefix = (type === 'cmd') ? '>> ' : '<< ';
             const contentSpan = document.createElement('span');
             contentSpan.className = 'log-content';
-            contentSpan.textContent = prefix + content;
+            
+            if (type === 'cmd' && content.startsWith('[#')) {
+                const match = content.match(/^\[#(\d+)\] (.*)/);
+                if (match) {
+                    const cmdId = match[1];
+                    displayContent = match[2];
+                    commandMap[cmdId] = line;
+                }
+            }
+            
+            contentSpan.textContent = prefix + displayContent;
+
+            if (responseId && commandMap[responseId]) {
+                line.style.borderLeft = '3px solid #4caf50';
+                line.style.paddingLeft = '10px';
+                line.style.backgroundColor = 'rgba(76, 175, 80, 0.1)';
+            }
 
             line.appendChild(timeSpan);
             line.appendChild(contentSpan);
@@ -151,11 +179,8 @@
                 
                 if (Array.isArray(logs) && logs.length > 0) {
                     if (isFirstPoll) {
-                        lastClearId = Math.max(...logs.map(l => l.id));
                         isFirstPoll = false;
-                        return; 
                     }
-                    
                     logs.forEach(log => {
                         appendLog(log.id, log.type, log.content, log.timestamp);
                     });

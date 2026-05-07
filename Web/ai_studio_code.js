@@ -16,17 +16,10 @@ const pool = new Pool({
 
 app.use(cors());
 app.use(express.json());
-app.use(express.text()); // Thêm hỗ trợ nhận text/plain
+app.use(express.text()); 
 
 let commandQueue = [];
 let lastEsp32Seen = Date.now();
-
-// Tự động đẩy lệnh kiểm tra sức khỏe mỗi 5 phút
-setInterval(() => {
-    const healthCmd = "AT+DEVINITSTATUS?";
-    commandQueue.push(healthCmd);
-    console.log(`[AUTO] Health check queued: ${healthCmd}`);
-}, 300000);
 
 const initDb = async (retries = 5) => {
     while (retries) {
@@ -70,10 +63,13 @@ app.get('/history', async (req, res) => {
 app.post('/command', async (req, res) => {
     const { command } = req.body;
     if (!command) return res.status(400).json({ error: "Missing command" });
-    commandQueue.push(command);
+    
+    const id = Date.now().toString().slice(-4);
+    commandQueue.push({ id, command });
+    
     try {
-        await pool.query('INSERT INTO logs (type, content) VALUES ($1, $2)', ['cmd', command]);
-        res.json({ status: "ok" });
+        await pool.query('INSERT INTO logs (type, content) VALUES ($1, $2)', ['cmd', `[#${id}] ${command}`]);
+        res.json({ status: "ok", id });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -110,37 +106,30 @@ app.post('/heartbeat', (req, res) => {
 app.get('/command', (req, res) => {
     lastEsp32Seen = Date.now();
     if (commandQueue.length > 0) {
-        const cmd = commandQueue.shift(); 
-        res.send(cmd);
-        console.log(`📤 Sent command to ESP32: ${cmd}`);
+        const items = [...commandQueue];
+        commandQueue = [];
+        const responseText = items.map(item => `${item.id}|${item.command}`).join('\n');
+        res.send(responseText);
+        console.log(`📤 Sent ${items.length} commands to ESP32`);
     } else {
         res.send(""); 
     }
 });
 
-// Endpoint upload nhận text/plain để tránh lỗi JSON parse
 app.post('/upload', async (req, res) => {
-    let data = req.body; // Với express.text(), body sẽ là chuỗi text trực tiếp
-    
+    let data = req.body; 
     if (!data || typeof data !== 'string') {
-        // Fallback nếu ESP32 vẫn gửi JSON (cho tương thích ngược)
         if (req.body && req.body.data) data = req.body.data;
         else return res.status(400).send("Missing data");
     }
-
-    const isRes = data.startsWith("OK") || data.startsWith("ERROR") || data.includes("OK\r") || data.includes("\nOK");
-    const type = isRes ? "res" : "data";
-
     try {
-        await pool.query('INSERT INTO logs (type, content) VALUES ($1, $2)', [type, data]);
+        await pool.query('INSERT INTO logs (type, content) VALUES ($1, $2)', ['log', data]);
         res.status(200).send("ok");
     } catch (err) {
-        console.error("❌ DB Insert Error:", err.message);
         res.status(500).send(err.message);
     }
 });
 
-app.listen(PORT, () => {
-    console.log(`🚀 Modern Remote Serial Monitor Server running at port ${PORT}`);
-    console.log(`🐘 PostgreSQL Database: ${process.env.DB_HOST || 'db'}:${process.env.DB_PORT || 5432}`);
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Server running on http://0.0.0.0:${PORT}`);
 });

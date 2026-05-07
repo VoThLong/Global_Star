@@ -8,9 +8,10 @@
 class UartBridge {
 public:
     UartBridge();
-    void connect(IPAddress ip, uint16_t port); // Giữ lại để tương thích main.cpp
+    void connect(const char* host, uint16_t port); 
     void update();
     void injectToServer(char c);
+    void notifyUartActivity();
     bool isClientConnected();
 
 private:
@@ -18,11 +19,20 @@ private:
     int bufferIdx;
     unsigned long lastByteTime;
     bool serverAvailable;
+    unsigned long lastUartActivityTime; // Theo dõi lần cuối có dữ liệu qua lại UART
     
     void sendDataToWeb(String data);
     void pollCommandFromWeb();
-    void sendHeartbeat();
-    unsigned long lastHeartbeat;
+    
+    struct PendingCmd {
+        String id;
+        String cmd;
+    };
+    PendingCmd cmdQueue[20];
+    int queueHead = 0;
+    int queueTail = 0;
+    String currentCmdId;
+    unsigned long lastCmdSentTime;
 };
 
 #endif

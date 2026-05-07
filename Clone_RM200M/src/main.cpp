@@ -5,28 +5,26 @@ static unsigned long lastHeartbeatMs = 0;
 static unsigned long totalRxBytes = 0;
 
 void setup() {
-  // USB serial monitor
-  Serial.begin(UART_BAUD);
+  // USB serial monitor (UART0 via CH340)
+  Serial.begin(115200);
+  delay(2000);
 
-  // Cho host USB có thời gian kết nối, tránh log đầu bị mất.
-  unsigned long waitStart = millis();
-  while (!Serial && (millis() - waitStart) < 1500) {
-    delay(10);
+  Serial.println("\n\n[SYSTEM] ESP32-S3 Bridge Starting...");
+  Serial.printf("[SYSTEM] Baudrate: %d, RX:%d, TX:%d\n", UART_BAUD, PIN_RX_IN, PIN_TX_OUT);
+
+  // Xóa trắng buffer Serial1 trước khi bắt đầu
+  Serial1.begin(UART_BAUD, SERIAL_8N1, PIN_RX_IN, PIN_TX_OUT); 
+  while(Serial1.available()) Serial1.read();
+  
+  // Simple TX test
+  delay(500);
+  for(int i = 0; i < 5; i++) {
+    Serial.println("[S3] UART1 TX TEST");
+    Serial1.println("[S3] If C3 sees this, UART1 TX works!");
+    delay(100);
   }
-
-  Serial.println("\n\n===============================");
-  Serial.println("ESP32-S3 UART Debug Bridge Starting...");
-  Serial.print("UART1 RX Pin: "); Serial.println(PIN_RX_IN);
-  Serial.print("UART1 TX Pin: "); Serial.println(PIN_TX_OUT);
-  Serial.print("UART Baud   : "); Serial.println(UART_BAUD);
-
-  // UART1 qua pin matrix, dùng chân do config.h khai báo.
-  Serial1.setRxBufferSize(1024);
-  Serial1.begin(UART_BAUD, SERIAL_8N1, PIN_RX_IN, PIN_TX_OUT);
-
-  Serial.println("Bridge Ready - Transparent Mode");
-  Serial.println("Type on USB monitor => sent to UART1 TX");
-  Serial.println("Bytes from UART1 RX => printed to USB monitor");
+  
+  Serial.println("[SYSTEM] Ready.");
   Serial.println("===============================");
 }
 
@@ -36,6 +34,7 @@ void loop() {
     int c = Serial.read();
     if (c >= 0) {
       Serial1.write(static_cast<uint8_t>(c));
+      Serial.write(static_cast<uint8_t>(c)); // Echo back to USB for debugging
       moved++;
     }
   }
@@ -43,7 +42,7 @@ void loop() {
   while (Serial1.available() && moved < 512) {
     int c = Serial1.read();
     if (c >= 0) {
-      Serial.write(static_cast<uint8_t>(c));
+      Serial.write(static_cast<uint8_t>(c)); // In tất cả bytes (printable hoặc control)
       totalRxBytes++;
       moved++;
     }

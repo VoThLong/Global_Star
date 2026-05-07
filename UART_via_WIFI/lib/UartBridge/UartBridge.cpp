@@ -1,34 +1,78 @@
 #include "UartBridge.h"
 
-UartBridge::UartBridge() : bufferIdx(0), lastByteTime(0), serverAvailable(false) {
+UartBridge::UartBridge() : bufferIdx(0), lastByteTime(0), serverAvailable(false), queueHead(0), queueTail(0), currentCmdId(""), lastUartActivityTime(0) {
     memset(buffer, 0, BUFFER_SIZE);
 }
 
-void UartBridge::connect(IPAddress ip, uint16_t port) {
-    // Với HTTP, ta không giữ kết nối liên tục như TCP
+void UartBridge::connect(const char* host, uint16_t port) {
     serverAvailable = true;
-    Serial.println("[HTTP] UartBridge ready in HTTP mode");
+    Serial.printf("[HTTP] UartBridge ready for host: %s\n", host);
 }
 
 void UartBridge::injectToServer(char c) {
+    lastUartActivityTime = millis(); // Có dữ liệu từ module là module đang thức
     if (bufferIdx < BUFFER_SIZE - 1) {
+        if (bufferIdx == 0 && currentCmdId.length() > 0) {
+            String prefix = "[" + currentCmdId + "] ";
+            for (int i = 0; i < (int)prefix.length(); i++) {
+                if (bufferIdx < BUFFER_SIZE - 1) buffer[bufferIdx++] = prefix[i];
+            }
+        }
         buffer[bufferIdx++] = c;
         lastByteTime = millis();
     }
 }
 
+void UartBridge::notifyUartActivity() {
+    lastUartActivityTime = millis();
+}
+
 void UartBridge::update() {
-    // 1. Gửi dữ liệu UART lên Web (Gom gói)
     if (bufferIdx > 0 && (millis() - lastByteTime > UART_AGGREGATION_MS)) {
         buffer[bufferIdx] = '\0';
-        sendDataToWeb(String(buffer));
+        String data = String(buffer);
+        
+        // --- URC TAGGING ---
+        // Nếu bản tin không có ID mà bắt đầu bằng +URC, gắn tag hệ thống
+        if (currentCmdId == "" && data.indexOf("+URC:") != -1) {
+            data = "[#URC_SYS] " + data;
+        }
+        // -------------------
+
+        sendDataToWeb(data);
         bufferIdx = 0;
         memset(buffer, 0, BUFFER_SIZE);
+        currentCmdId = ""; 
     }
 
-    // 2. Định kỳ lấy lệnh từ Web về (Poll)
+    if (currentCmdId != "" && (millis() - lastCmdSentTime > 3000)) {
+        sendDataToWeb("[" + currentCmdId + "] Error: Response Timeout (3s)");
+        currentCmdId = ""; 
+    }
+
+    if (currentCmdId == "" && queueHead != queueTail) {
+        currentCmdId = cmdQueue[queueHead].id;
+        String actualCmd = cmdQueue[queueHead].cmd;
+        sendDataToWeb("__ACK__:" + currentCmdId);
+
+        // --- TARGETED WAKE-UP ---
+        // Chỉ đánh thức khi rảnh quá 5 giây
+        if (millis() - lastUartActivityTime > 5000) {
+            Serial.println("[UART] Idle > 5s, sending wake-up byte before command...");
+            Serial1.write('\r');
+            delay(50);
+        }
+        // ------------------------
+
+        Serial1.println(actualCmd);
+        Serial1.flush();
+        lastCmdSentTime = millis();
+        lastUartActivityTime = millis();
+        queueHead = (queueHead + 1) % 20;
+    }
+
     static unsigned long lastPoll = 0;
-    if (millis() - lastPoll > 1000) { // Poll mỗi 1 giây
+    if (millis() - lastPoll > 1000) {
         pollCommandFromWeb();
         lastPoll = millis();
     }
@@ -36,42 +80,44 @@ void UartBridge::update() {
 
 void UartBridge::sendDataToWeb(String data) {
     if (WiFi.status() != WL_CONNECTED) return;
-
     HTTPClient http;
     http.begin(API_UPLOAD);
-    http.addHeader("Content-Type", "text/plain"); // Gửi dạng văn bản thuần túy
-
-    int httpResponseCode = http.POST(data); // Gửi trực tiếp chuỗi data thô
-    
-    if (httpResponseCode > 0) {
-        // Thành công
-    } else {
-        Serial.printf("[HTTP] Send failed, error: %s\n", http.errorToString(httpResponseCode).c_str());
-    }
+    http.addHeader("Content-Type", "text/plain");
+    int httpResponseCode = http.POST(data);
     http.end();
 }
 
 void UartBridge::pollCommandFromWeb() {
     if (WiFi.status() != WL_CONNECTED) return;
-
     HTTPClient http;
+    http.setConnectTimeout(1000); 
     http.begin(API_COMMAND);
-    
     int httpResponseCode = http.GET();
-    
     if (httpResponseCode == 200) {
         String payload = http.getString();
         if (payload.length() > 0) {
-            Serial.print("\n[WEB CMD] Received: ");
-            Serial.println(payload);
-            
-            // Gửi lệnh xuống Module RM200M qua Serial1 kèm theo ký tự xuống dòng
-            Serial1.println(payload); 
-            
-            // Phản hồi ngược lại Web Server để xác nhận đã nhận lệnh (nếu cần)
-            // Ở đây ta có thể in ra Serial để người dùng thấy trên CuteCom
-            Serial.print(">> Sent to RM200M: ");
-            Serial.println(payload);
+            int startIdx = 0;
+            int endIdx = payload.indexOf('\n');
+            while (true) {
+                String line = (endIdx == -1) ? payload.substring(startIdx) : payload.substring(startIdx, endIdx);
+                line.trim();
+                if (line.length() > 0) {
+                    int sepIdx = line.indexOf('|');
+                    if (sepIdx != -1) {
+                        String id = line.substring(0, sepIdx);
+                        String cmd = line.substring(sepIdx + 1);
+                        int nextTail = (queueTail + 1) % 20;
+                        if (nextTail != queueHead) {
+                            cmdQueue[queueTail].id = id;
+                            cmdQueue[queueTail].cmd = cmd;
+                            queueTail = nextTail;
+                        }
+                    }
+                }
+                if (endIdx == -1) break;
+                startIdx = endIdx + 1;
+                endIdx = payload.indexOf('\n', startIdx);
+            }
         }
     }
     http.end();
