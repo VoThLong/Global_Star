@@ -1,6 +1,6 @@
 #include "UartBridge.h"
 
-UartBridge::UartBridge() : bufferIdx(0), lastByteTime(0), serverAvailable(false), queueHead(0), queueTail(0), currentCmdId(""), lastUartActivityTime(0) {
+UartBridge::UartBridge() : bufferIdx(0), lastByteTime(0), serverAvailable(false), queueHead(0), queueTail(0), currentCmdId(""), lastUartActivityTime(0), offlineCount(0) {
     memset(buffer, 0, BUFFER_SIZE);
 }
 
@@ -10,7 +10,7 @@ void UartBridge::connect(const char* host, uint16_t port) {
 }
 
 void UartBridge::injectToServer(char c) {
-    lastUartActivityTime = millis(); // Có dữ liệu từ module là module đang thức
+    lastUartActivityTime = millis(); 
     if (bufferIdx < BUFFER_SIZE - 1) {
         if (bufferIdx == 0 && currentCmdId.length() > 0) {
             String prefix = "[" + currentCmdId + "] ";
@@ -28,25 +28,53 @@ void UartBridge::notifyUartActivity() {
 }
 
 void UartBridge::update() {
+    // 1. Xử lý dữ liệu UART mới (Gom gói)
     if (bufferIdx > 0 && (millis() - lastByteTime > UART_AGGREGATION_MS)) {
         buffer[bufferIdx] = '\0';
         String data = String(buffer);
         
-        // --- URC TAGGING ---
-        // Nếu bản tin không có ID mà bắt đầu bằng +URC, gắn tag hệ thống
         if (currentCmdId == "" && data.indexOf("+URC:") != -1) {
             data = "[#URC_SYS] " + data;
         }
-        // -------------------
 
-        sendDataToWeb(data);
+        // Thử gửi ngay
+        if (!sendDataToWeb(data)) {
+            // Nếu gửi thất bại, lưu vào bộ đệm offline
+            if (offlineCount < MAX_OFFLINE_BUFFER) {
+                offlineBuffer[offlineCount++] = data;
+                Serial.printf("[BUFFER] Saved to offline queue (%d/%d)\n", offlineCount, MAX_OFFLINE_BUFFER);
+            } else {
+                Serial.println("[BUFFER] Queue full, data lost!");
+            }
+        }
+
         bufferIdx = 0;
         memset(buffer, 0, BUFFER_SIZE);
         currentCmdId = ""; 
     }
 
+    // 2. Xả bộ đệm offline khi có mạng lại (Mỗi lần update chỉ gửi 1 gói để tránh nghẽn)
+    if (WiFi.status() == WL_CONNECTED && offlineCount > 0) {
+        static unsigned long lastFlush = 0;
+        if (millis() - lastFlush > 500) { // Giãn cách 500ms mỗi gói xả
+            if (sendDataToWeb("[OFFLINE] " + offlineBuffer[0])) {
+                // Gửi thành công, dịch chuyển mảng sang trái
+                for (int i = 0; i < offlineCount - 1; i++) {
+                    offlineBuffer[i] = offlineBuffer[i+1];
+                }
+                offlineCount--;
+                Serial.printf("[BUFFER] Flushed 1 item, remaining: %d\n", offlineCount);
+            }
+            lastFlush = millis();
+        }
+    }
+
+    // 3. Xử lý timeout lệnh
     if (currentCmdId != "" && (millis() - lastCmdSentTime > 3000)) {
-        sendDataToWeb("[" + currentCmdId + "] Error: Response Timeout (3s)");
+        String errMsg = "[" + currentCmdId + "] Error: Response Timeout (3s)";
+        if (!sendDataToWeb(errMsg) && offlineCount < MAX_OFFLINE_BUFFER) {
+            offlineBuffer[offlineCount++] = errMsg;
+        }
         currentCmdId = ""; 
     }
 
@@ -78,13 +106,15 @@ void UartBridge::update() {
     }
 }
 
-void UartBridge::sendDataToWeb(String data) {
-    if (WiFi.status() != WL_CONNECTED) return;
+bool UartBridge::sendDataToWeb(String data) {
+    if (WiFi.status() != WL_CONNECTED) return false;
     HTTPClient http;
+    http.setConnectTimeout(2000); // Timeout 2s để tránh treo nếu mạng lag
     http.begin(API_UPLOAD);
     http.addHeader("Content-Type", "text/plain");
     int httpResponseCode = http.POST(data);
     http.end();
+    return (httpResponseCode == 200);
 }
 
 void UartBridge::pollCommandFromWeb() {

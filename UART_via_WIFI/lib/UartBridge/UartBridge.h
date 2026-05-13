@@ -5,6 +5,8 @@
 #include <HTTPClient.h>
 #include "config.h"
 
+#define MAX_OFFLINE_BUFFER 20 // Lưu tối đa 20 bản tin khi mất mạng
+
 class UartBridge {
 public:
     UartBridge();
@@ -19,9 +21,14 @@ private:
     int bufferIdx;
     unsigned long lastByteTime;
     bool serverAvailable;
-    unsigned long lastUartActivityTime; // Theo dõi lần cuối có dữ liệu qua lại UART
+    unsigned long lastUartActivityTime; 
     
-    void sendDataToWeb(String data);
+    // --- Cơ chế bộ đệm ngoại tuyến (Offline Buffering) ---
+    String offlineBuffer[MAX_OFFLINE_BUFFER];
+    int offlineCount;
+    bool sendDataToWeb(String data); // Trả về true nếu gửi thành công
+    // -----------------------------------------------------
+
     void pollCommandFromWeb();
     
     struct PendingCmd {
