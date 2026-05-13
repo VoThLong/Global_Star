@@ -13,28 +13,16 @@ void setup() {
     Serial.begin(DEBUG_BAUD);
     Serial1.begin(RM200_BAUD, SERIAL_8N1, RM200_RX_PIN, RM200_TX_PIN);
 
-    // Gửi ngay ra Serial1 để test link với con S3
-    for(int i=0; i<5; i++) {
-        Serial1.println(">>> C3 TO S3 LINK TEST OK <<<");
-        delay(100);
-    }
-
     unsigned long waitStart = millis();
     while (!Serial && (millis() - waitStart < 3000)) {
         delay(10);
     }
     delay(1000);
     
-    // In ra cả 2 cổng để debug tiện lợi
-    const char* header = "\n--- UART to TCP Server Bridge ---";
-    Serial.println(header);
-    Serial1.println(header);
-
+    // In ra cổng debug USB
+    Serial.println("\n--- UART to TCP Server Bridge (RM200M) ---");
     Serial.printf("Debug baud: %d\n", DEBUG_BAUD);
-    Serial1.printf("Debug baud: %d\n", DEBUG_BAUD);
-
-    Serial.printf("UART1 config: baud=%d RX=%d TX=%d\n", RM200_BAUD, RM200_RX_PIN, RM200_TX_PIN);
-    Serial1.printf("UART1 config: baud=%d RX=%d TX=%d\n", RM200_BAUD, RM200_RX_PIN, RM200_TX_PIN);
+    Serial.printf("RM200M UART config: baud=%d RX=%d TX=%d\n", RM200_BAUD, RM200_RX_PIN, RM200_TX_PIN);
 
     net.begin(WIFI_SSID, WIFI_PASS);
     // Kích hoạt Modem Sleep để giảm nhiệt cho khối Radio WiFi
